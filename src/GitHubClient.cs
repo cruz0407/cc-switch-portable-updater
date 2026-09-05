@@ -11,7 +11,7 @@ namespace CCSwitchUpdater {
    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
    client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate });
    client.Timeout = Timeout.InfiniteTimeSpan;
-   client.DefaultRequestHeaders.UserAgent.ParseAdd("CCSwitch-Portable-Update-Helper/1.0");
+   client.DefaultRequestHeaders.UserAgent.ParseAdd("CCSwitch-Portable-Update-Helper/1.3");
    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
   }
   async Task<HttpResponseMessage> GetAsync(string url, bool asset, CancellationToken token) {

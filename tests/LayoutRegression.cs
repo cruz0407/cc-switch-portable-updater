@@ -4,8 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CCSwitchUpdater;
+[assembly: AssemblyVersion("3.20.1.0")]
+[assembly: AssemblyFileVersion("3.20.1.0")]
 class LayoutRegression {
  static int failures,checks;
  static IEnumerable<Control> Tree(Control c) { yield return c; foreach(Control child in c.Controls) foreach(Control item in Tree(child)) yield return item; }
@@ -42,7 +46,11 @@ class LayoutRegression {
  }
  [STAThread] static int Main(string[] args) {
   Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-  using(var form=new MainForm(args[0])) {
+  string fixture=Path.Combine(Path.GetTempPath(),"ccswitch-layout-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(fixture);
+  string exe=Path.Combine(fixture,"cc-switch.exe"); File.Copy(Assembly.GetExecutingAssembly().Location,exe);
+  using(var stream=File.Open(exe,FileMode.Open,FileAccess.ReadWrite)) using(var reader=new BinaryReader(stream)) { stream.Position=0x3c; int offset=reader.ReadInt32(); stream.Position=offset+4; stream.WriteByte(0x64); stream.WriteByte(0x86); }
+  File.WriteAllText(Path.Combine(fixture,"portable.ini"),"portable=true");
+  using(var form=new MainForm(fixture, delegate(string architecture,CancellationToken token) { return Task.FromResult(new Release {Version=new Version(3,20,1,0),Tag="v3.20.1",Notes="# Release notes\n\n**Test** preview."}); })) {
    form.StartPosition=FormStartPosition.Manual; form.Location=new Point(-30000,-30000); form.ShowInTaskbar=false; form.Show(); Application.DoEvents();
    if(args.Length>2) { float factor=float.Parse(args[2],System.Globalization.CultureInfo.InvariantCulture); Console.WriteLine("Synthetic font + geometry scaling factor="+factor); SimulateScale(form,factor); }
    using(var g=form.CreateGraphics()) Console.WriteLine("DPI="+g.DpiX+" baseline="+form.AutoScaleDimensions+" current="+form.CurrentAutoScaleDimensions+" client="+form.ClientSize+" min="+form.MinimumSize);

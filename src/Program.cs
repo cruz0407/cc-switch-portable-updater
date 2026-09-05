@@ -5,8 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 [assembly: AssemblyProduct("CC Switch Portable Update Helper")]
 namespace CCSwitchUpdater {
  static class Program {
@@ -26,5 +26,3 @@ namespace CCSwitchUpdater {
   }
  }
 }
-
-

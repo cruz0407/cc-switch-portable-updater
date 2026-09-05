@@ -9,18 +9,21 @@ using System.Windows.Forms;
 namespace CCSwitchUpdater {
  public sealed class MainForm : Form {
   readonly string directory, exe, work, backupRoot;
+  readonly Func<string,CancellationToken,Task<Release>> fetchRelease;
   string dataDirectory, architecture, targetArchitecture;
   Version current;
   Release latest;
-  bool busy, installing;
+  bool busy, installing, automaticCheckStarted;
   CancellationTokenSource cancellation;
   readonly Label currentValue=new Label(), latestValue=new Label(), status=new Label(), paths=new Label();
-  readonly TextBox notes=new TextBox(), logBox=new TextBox(), programPath=new TextBox(), dataPath=new TextBox();
+  readonly TextBox logBox=new TextBox(), programPath=new TextBox(), dataPath=new TextBox();
+  readonly WebBrowser notesBrowser=new WebBrowser();
   readonly ToolTip pathTips=new ToolTip { AutoPopDelay=15000 };
   readonly ProgressBar progress=new ProgressBar();
   readonly Button check=new Button(), update=new Button(), launch=new Button(), cancel=new Button();
   readonly Color blue=Color.FromArgb(38,83,179), ink=Color.FromArgb(31,45,65), muted=Color.FromArgb(100,113,133);
-  public MainForm(string targetDirectory) {
+  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher = null) {
+   fetchRelease=releaseFetcher ?? FetchOfficialReleaseAsync;
    directory=Path.GetFullPath(targetDirectory); exe=Path.Combine(directory,"cc-switch.exe");
    work=Path.Combine(directory,"update-helper-data");
    backupRoot=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"CCSwitchUpdateHelper","backups");
@@ -34,6 +37,7 @@ namespace CCSwitchUpdater {
    try { Icon=Icon.ExtractAssociatedIcon(exe); } catch(Exception) {}
    BuildLayout();
    ResumeLayout(true);
+   Shown+=async delegate { if(automaticCheckStarted || IsDisposed || !check.Enabled) return; automaticCheckStarted=true; await CheckAsync(); };
    check.Click+=async delegate { await CheckAsync(); };
    update.Click+=async delegate { await UpdateAsync(); };
    launch.Click+=delegate { try { Launch(); } catch(Exception e) { Fail(e); } };
@@ -70,8 +74,8 @@ namespace CCSwitchUpdater {
 
    var tabs=new TabControl { Name="InformationTabs",Dock=DockStyle.Fill,Margin=new Padding(0) };
    var releaseTab=new TabPage("更新说明") { Padding=new Padding(10,8,10,8) }; var logTab=new TabPage("操作日志") { Padding=new Padding(10,8,10,8) };
-   SetupText(notes); SetupText(logBox); notes.Text="点击“检查更新”获取官方稳定版和更新说明。\r\n\r\n安全边界\r\n• 只替换 cc-switch.exe，保留 portable.ini 和同目录其他程序。\r\n• 下载和校验完成后，才会请你退出 CC Switch。\r\n• 更新前备份数据；不强制结束进程，不自动降级数据库。\r\n• 只访问官方 GitHub，使用系统代理设置。\r\n• 按系统原生架构选包；同版本可重新安装 / 修复。";
-   releaseTab.Controls.Add(notes); logTab.Controls.Add(logBox); tabs.TabPages.Add(releaseTab); tabs.TabPages.Add(logTab); layout.Controls.Add(tabs,0,5);
+   SetupText(logBox); SetupMarkdownBrowser(notesBrowser);
+   releaseTab.Controls.Add(notesBrowser); logTab.Controls.Add(logBox); tabs.TabPages.Add(releaseTab); tabs.TabPages.Add(logTab); layout.Controls.Add(tabs,0,5);
 
    var actions=new FlowLayoutPanel { Name="Actions",Dock=DockStyle.Fill,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,FlowDirection=FlowDirection.LeftToRight,WrapContents=true,Margin=new Padding(0,12,0,0) };
    SetupButton(check,"检查更新",104,false); SetupButton(update,"下载并更新",148,true); SetupButton(launch,"打开 CC Switch",142,false); SetupButton(cancel,"取消",76,false);
@@ -97,10 +101,30 @@ namespace CCSwitchUpdater {
    box.ReadOnly=true; box.BorderStyle=BorderStyle.None; box.BackColor=Color.White; box.ForeColor=muted; box.Dock=DockStyle.Fill; box.Margin=new Padding(0,1,0,3); box.AccessibleName=caption; box.WordWrap=false;
    rows.Controls.Add(label,0,row); rows.Controls.Add(box,1,row);
   }
+  void SetupMarkdownBrowser(WebBrowser browser) {
+   browser.Name="MarkdownPreview"; browser.Dock=DockStyle.Fill;
+   browser.AllowWebBrowserDrop=false; browser.IsWebBrowserContextMenuEnabled=false;
+   browser.ScriptErrorsSuppressed=true; browser.WebBrowserShortcutsEnabled=false;
+   browser.NewWindow+=delegate(object sender,System.ComponentModel.CancelEventArgs e) { e.Cancel=true; };
+   browser.Navigating+=delegate(object sender,WebBrowserNavigatingEventArgs e) {
+    if(e.Url!=null && e.Url.AbsoluteUri=="about:blank") return;
+    e.Cancel=true;
+    if(e.Url!=null && Markdown.IsSafeLink(e.Url.AbsoluteUri)) {
+     // Link navigation is only permitted after an explicit click and confirmation.
+     if(MessageBox.Show(this,"在默认浏览器中打开此链接？\r\n\r\n"+e.Url.AbsoluteUri,"打开更新说明链接",MessageBoxButtons.OKCancel,MessageBoxIcon.Question)!=DialogResult.OK) return;
+     try { Process.Start(new ProcessStartInfo(e.Url.AbsoluteUri){UseShellExecute=true}); }
+     catch(Exception ex) { Log("无法打开更新说明链接："+ex.Message); }
+    }
+   };
+   browser.DocumentText=Markdown.ToDocument("正在准备检查官方稳定版。\n\n只检查更新，不会自动下载或安装。");
+  }
+  static async Task<Release> FetchOfficialReleaseAsync(string architecture,CancellationToken token) {
+   using(var client=new GitHubClient()) return await client.GetLatestAsync(architecture,token);
+  }
   void SetupText(TextBox box) { box.Multiline=true; box.ReadOnly=true; box.Dock=DockStyle.Fill; box.ScrollBars=ScrollBars.Vertical; box.BorderStyle=BorderStyle.None; box.BackColor=Color.White; box.ForeColor=ink; box.Font=new Font("Microsoft YaHei UI",9.5F); }
   void SetupButton(Button b,string text,int width,bool primary) { b.Text=text; b.AutoSize=true; b.AutoSizeMode=AutoSizeMode.GrowAndShrink; b.MinimumSize=new Size(width,36); b.Padding=new Padding(12,5,12,5); b.Margin=new Padding(0,0,8,5); b.FlatStyle=FlatStyle.Flat; b.FlatAppearance.BorderColor=Color.FromArgb(207,216,231); b.BackColor=primary?blue:Color.White; b.ForeColor=primary?Color.White:ink; b.Cursor=Cursors.Hand; if(primary) b.EnabledChanged+=delegate { b.BackColor=b.Enabled?blue:Color.FromArgb(235,239,245); b.ForeColor=b.Enabled?Color.White:muted; }; }
   void AddLink(FlowLayoutPanel panel,string text,Action action) { var link=new LinkLabel { Text=text,AutoSize=true,LinkColor=blue,Margin=new Padding(0,2,18,2) }; link.LinkClicked+=delegate { try { action(); } catch(Exception e) { Fail(e); } }; panel.Controls.Add(link); }
-  protected override void Dispose(bool disposing) { if(disposing) pathTips.Dispose(); base.Dispose(disposing); }
+  protected override void Dispose(bool disposing) { if(disposing) { if(cancellation!=null) cancellation.Cancel(); pathTips.Dispose(); } base.Dispose(disposing); }
   void RefreshLocal() {
    Core.EnsureNoReparse(exe); Core.RequirePortable(directory); current=Core.ReadVersion(exe); architecture=Core.ReadArchitecture(exe);
    targetArchitecture=Core.ReadNativeArchitecture();
@@ -138,17 +162,19 @@ namespace CCSwitchUpdater {
   void Fail(Exception e) { string message=e is System.Net.Http.HttpRequestException ? "无法连接 GitHub。请检查网络或系统代理后重试。" : e.Message; Status(message,true); Log("失败："+message); }
   async Task CheckAsync() {
    if(busy) return;
+   automaticCheckStarted=true;
    latest=null; SetBusy(true); progress.Style=ProgressBarStyle.Marquee; Status("正在检查 GitHub 官方稳定版…",false); Log("检查官方稳定版。");
    cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(45));
    try {
     RefreshLocal();
-    using(var client=new GitHubClient()) latest=await client.GetLatestAsync(targetArchitecture,cancellation.Token);
-    latestValue.Text=latest.Version.ToString(3); notes.Text=latest.Notes.Replace("\r\n","\n").Replace("\n",Environment.NewLine);
+    latest=await fetchRelease(targetArchitecture,cancellation.Token);
+    if(IsDisposed || Disposing) return;
+    latestValue.Text=latest.Version.ToString(3); notesBrowser.DocumentText=Markdown.ToDocument(latest.Notes);
     ShowReleaseStatus();
     Log("本机 "+current.ToString(3)+"（"+architecture+"） / 官方 "+latest.Tag+" / 系统及目标 "+targetArchitecture);
-   } catch(OperationCanceledException) { Status("检查已取消或超时。可检查系统代理后重试。",false); Log("检查取消或超时。"); }
-   catch(Exception e) { latest=null; latestValue.Text="未获取"; Fail(e); }
-   finally { cancellation.Dispose(); cancellation=null; progress.Style=ProgressBarStyle.Blocks; progress.Value=0; SetBusy(false); }
+   } catch(OperationCanceledException) { if(!IsDisposed && !Disposing) { Status("检查已取消或超时。可检查系统代理后重试。",false); Log("检查取消或超时。"); } }
+   catch(Exception e) { latest=null; if(!IsDisposed && !Disposing) { latestValue.Text="未获取"; Fail(e); } }
+   finally { cancellation.Dispose(); cancellation=null; if(!IsDisposed && !Disposing) { progress.Style=ProgressBarStyle.Blocks; progress.Value=0; SetBusy(false); } }
   }
   static Process[] Running() { return Process.GetProcessesByName("cc-switch"); }
   static void EnsureStopped() {
@@ -222,7 +248,3 @@ namespace CCSwitchUpdater {
   }
  }
 }
-
-
-
-

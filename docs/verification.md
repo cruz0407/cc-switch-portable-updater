@@ -1,56 +1,17 @@
-# Verification — 2026-09-06 (local Asia/Shanghai)
+# 验证记录
 
-- Compiled with Windows .NET Framework csc.exe; no downloaded compiler or dependencies.
-- 29 core behavior tests passed, including real file locks, isolated atomic replacement,
-  neighbor preservation, database backup and protected backup ACL.
-- Initial RED run: 29 tests failed with NotImplementedException; then implementation made them pass.
-- ACL tests require running outside the Codex restricted sandbox; they pass in the ordinary host context.
-- Official GitHub API and real portable ZIP download passed; metadata size, SHA256,
-  archive layout, executable product name, PE architecture and file version all verified.
-- WinForms constructor, local path/version detection and off-screen form render passed;
-  rendered image visually inspected after showing the form off-screen to create child handles.
-- Existing executable remains 3.20.1 and matches the independently downloaded official executable:
-  077B9C9EC89D748A008A3E6E5735A576ADA977FD5FE747EDD9F02DDE82923616.
-- Current CC Switch was not stopped, replaced or restarted. Downloaded executable was never executed.
-- Not verified: actual in-place user upgrade (already at latest), ARM64 hardware, all DPI settings,
-  GUI click-through of every cancellation/error branch, power-loss recovery.
-- Reviewed locally: official host allowlist, strict two-file ZIP whitelist, guarded same-volume
-  File.Replace without pre-deletion, process rechecks, data backup ACL, no forced process kill.
+## v1.3.0
 
-## v1.1 architecture repair and same-version reinstall
-- Reproduced the original UI regressions before the patch: same-version install disabled,
-  missing native-architecture target, missing mismatch warning, x86 blocking all checks.
-- Fixed target selection to Windows native architecture via IsWow64Process2, with legacy
-  GetNativeSystemInfo fallback. Installed PE architecture is displayed separately.
-- Allows same-version reinstall and architecture repair; versions older than the installed
-  version remain blocked. Rechecks version, architecture and original executable SHA256
-  after exit confirmation to catch files changed while the user was deciding.
-- Fresh build: 29 core tests + 6 UI regression scenarios pass. Regressions run via build.ps1 -Test.
-- Real off-screen UI check against GitHub completed; local and remote 3.20.1,
-  button text is “重新安装 / 修复”, Enabled=True. Screenshot visually inspected.
-- Existing user cc-switch.exe remains x64 (PE 0x8664), version 3.20.1, SHA256 unchanged.
-- No installation or process termination was performed. ARM64 OS hardware remains untested.
+- Windows x64 / .NET Framework 4.8；使用系统 csc.exe，无 NuGet 依赖。
+- 29 项核心测试、11 项 Markdown 测试、6 项架构场景、6 项启动/渲染场景通过。
+- 布局回归涵盖默认窗口、最小窗口、长路径和长错误提示；实际 144 DPI 和虚拟化 96 DPI 上下文，另有 125% / 200% 字号/尺寸模拟。
+- 启动回归使用异步发布信息获取接口，覆盖：不点击即检查一次、重复显示不重复检查、保留手动检查、断网恢复、取消后台任务和真实 WebBrowser HTML DOM。
+- 真实网络验收：显示窗口后不点击任何按钮，取得官方稳定版并生成标题、加粗和链接 DOM。
+- 预览截图通过 PrintWindow 对测试窗口取图；文档截图中路径替换成示例路径。
+- Markdown 原始 HTML 编码为文本，远程图片不加载，HTTP/脚本/文件等非 HTTPS 链接不生成导航入口。
+- 未执行实际 CC Switch 安装、退出或数据库恢复；未进行 ARM64 实机或跨显示器 DPI 验证。
 
-## v1.2 DPI/layout correction
-- Reproduced the attached screenshot under the shipped DPI-aware manifest at actual 144 DPI:
-  title/subtitle overlap, version caption/value overlap, and clipped path rows (5 detected violations).
-- Root cause: missing 96-DPI authoring baseline plus fixed pixel rows and absolute child positions.
-  Earlier UiSmoke renders were DPI-unaware and did not exercise the shipped manifest behavior.
-- Set the 96-DPI baseline before building the form, with SuspendLayout / ResumeLayout.
-- Replaced fixed header, version, details, status, button and footer rows with content-sized layout.
-  Long paths now have single-line selectable read-only fields with horizontal scrolling and tooltips.
-  Status messages wrap; buttons size to text; action/footer rows can wrap; disabled primary button
-  uses a muted background. The tab region takes remaining height rather than overlapping actions.
-- Caught and fixed a second regression at minimum window size: TabControl.MinimumSize was forcing
-  it over the footer. Removed that conflicting minimum, retaining scrollable notes/log content.
-- Fresh verification: 29 core + 6 architecture/reinstall regressions pass. Four layout runs each
-  pass 321 geometry assertions across default, minimum and minimum-with-long-content cases.
-- Actual execution contexts: 144 DPI with the production manifest; virtualized 96 DPI without it.
-  125% and 200% are synthetic geometry/font stress tests, not changes to the user's desktop DPI.
-- Screenshots reviewed: native-DPI default and minimum/long-content states.
-- build.ps1 -Test now includes the manifest-matched layout regression and synthetic stress checks.
-  Optional -OutputDirectory allows validating a candidate without overwriting a running helper.
-- Deployed v1.2.0.0 to the original helper path using atomic replacement after normal helper exit;
-  old helper is backed up. Deployed SHA256 matches tested candidate.
-- CC Switch was not closed or modified; its SHA256 remains
-  077B9C9EC89D748A008A3E6E5735A576ADA977FD5FE747EDD9F02DDE82923616.
+## 发布约定
+
+只上传当前项目源码、中文说明、无本机信息的预览图、构建后的助手 EXE、便携 ZIP 和校验清单。
+不打包 CC Switch 本体、其他应用、配置、数据库、日志或备份。
