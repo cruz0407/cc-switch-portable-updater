@@ -1,0 +1,6 @@
+# generated local files
+build/
+dist/
+*.tmp
+*.log
+.vs/
