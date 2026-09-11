@@ -7,15 +7,20 @@ using System.Threading.Tasks;
 namespace CCSwitchUpdater {
  public sealed class GitHubClient : IDisposable {
   readonly HttpClient client;
-  public GitHubClient() {
+  readonly NetworkCooldown cooldown;
+  public GitHubClient(NetworkSettings settings = null, HttpMessageHandler handler = null, NetworkCooldown gate = null) {
+   cooldown=gate ?? new NetworkCooldown();
+   settings=settings ?? new NetworkSettings(); settings.Validate();
    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-   client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate });
+   client = new HttpClient(handler ?? settings.CreateHandler());
    client.Timeout = Timeout.InfiniteTimeSpan;
-   client.DefaultRequestHeaders.UserAgent.ParseAdd("CCSwitch-Portable-Update-Helper/1.3");
+   client.DefaultRequestHeaders.UserAgent.ParseAdd("CCSwitch-Portable-Update-Helper/1.4");
    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
   }
   async Task<HttpResponseMessage> GetAsync(string url, bool asset, CancellationToken token) {
    if (!Core.IsAllowedUrl(url, asset)) throw new InvalidDataException("不可信的请求地址。");
+   cooldown.Check(DateTimeOffset.UtcNow);
+   token.ThrowIfCancellationRequested();
    Uri current = new Uri(url);
    for (int i=0; i<6; i++) {
     var response = await client.GetAsync(current, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
@@ -31,13 +36,27 @@ namespace CCSwitchUpdater {
      current = next; continue;
     }
     if (!response.IsSuccessStatusCode) {
-     response.Dispose();
-     if (status == 403 || status == 429) throw new IOException("GitHub 拒绝请求或触发访问限流（HTTP " + status + "）。请稍后重试，或检查系统代理。");
-     throw new IOException("GitHub 请求失败（HTTP " + status + "），请稍后重试。");
+     try {
+      string body=await ReadErrorBodyAsync(response,token).ConfigureAwait(false);
+      var error=GitHubFailure.Describe(response,body,DateTimeOffset.UtcNow);
+      cooldown.Record(error); throw error;
+     } finally { response.Dispose(); }
     }
     return response;
    }
    throw new IOException("GitHub 重定向次数过多。");
+  }
+  static async Task<string> ReadErrorBodyAsync(HttpResponseMessage response,CancellationToken token) {
+   if(response.Content==null) return "";
+   using(var input=await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+   using(var memory=new MemoryStream()) {
+    byte[] buffer=new byte[4096];
+    while(memory.Length<32768) {
+     int n=await input.ReadAsync(buffer,0,(int)Math.Min(buffer.Length,32768-memory.Length),token).ConfigureAwait(false);
+     if(n==0) break; memory.Write(buffer,0,n);
+    }
+    return System.Text.Encoding.UTF8.GetString(memory.ToArray());
+   }
   }
   public async Task<Release> GetLatestAsync(string architecture, CancellationToken token) {
    using(var response = await GetAsync(Core.LatestUrl, false, token).ConfigureAwait(false))

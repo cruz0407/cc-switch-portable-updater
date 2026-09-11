@@ -10,6 +10,9 @@ namespace CCSwitchUpdater {
  public sealed class MainForm : Form {
   readonly string directory, exe, work, backupRoot;
   readonly Func<string,CancellationToken,Task<Release>> fetchRelease;
+  readonly NetworkCooldown networkCooldown=new NetworkCooldown();
+  NetworkSettings networkSettings=new NetworkSettings();
+  readonly LinkLabel networkLink=new LinkLabel();
   string dataDirectory, architecture, targetArchitecture;
   Version current;
   Release latest;
@@ -46,7 +49,7 @@ namespace CCSwitchUpdater {
     if(installing) { e.Cancel=true; MessageBox.Show(this,"正在备份或替换，请等待完成后再关闭。","正在更新"); }
     else if(busy) { e.Cancel=true; if(cancellation!=null) cancellation.Cancel(); Status("正在取消，请稍候再关闭窗口。",false); }
    };
-   try { RefreshLocal(); ShowReadyStatus(); }
+   try { networkSettings=NetworkSettings.Load(Path.Combine(work,"network.json")); UpdateNetworkLabel(); RefreshLocal(); ShowReadyStatus(); }
    catch(Exception e) { check.Enabled=false; update.Enabled=false; launch.Enabled=File.Exists(exe); Fail(e); }
   }
   void BuildLayout() {
@@ -83,6 +86,8 @@ namespace CCSwitchUpdater {
 
    var footer=new FlowLayoutPanel { Name="Footer",Dock=DockStyle.Fill,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,WrapContents=true,Margin=new Padding(0,5,0,0) };
    AddLink(footer,"打开日志目录",delegate { OpenDirectory(work); }); AddLink(footer,"查看备份",delegate { OpenDirectory(backupRoot); });
+   networkLink.AutoSize=true; networkLink.LinkColor=blue; networkLink.Margin=new Padding(0,2,18,2); networkLink.Text="网络设置（系统代理）"; networkLink.LinkClicked+=delegate { ConfigureNetwork(); }; footer.Controls.Add(networkLink);
+   AddLink(footer,"浏览器打开官方发布页",delegate { OpenOfficialRelease(); });
    var disclaimer=TextLabel("非官方辅助工具 · 不常驻后台"); disclaimer.ForeColor=muted; disclaimer.Margin=new Padding(4,2,0,2); footer.Controls.Add(disclaimer); layout.Controls.Add(footer,0,7);
   }
   TableLayoutPanel AutoTable(int columns) {
@@ -118,8 +123,8 @@ namespace CCSwitchUpdater {
    };
    browser.DocumentText=Markdown.ToDocument("正在准备检查官方稳定版。\n\n只检查更新，不会自动下载或安装。");
   }
-  static async Task<Release> FetchOfficialReleaseAsync(string architecture,CancellationToken token) {
-   using(var client=new GitHubClient()) return await client.GetLatestAsync(architecture,token);
+  async Task<Release> FetchOfficialReleaseAsync(string architecture,CancellationToken token) {
+   using(var client=new GitHubClient(networkSettings,null,networkCooldown)) return await client.GetLatestAsync(architecture,token);
   }
   void SetupText(TextBox box) { box.Multiline=true; box.ReadOnly=true; box.Dock=DockStyle.Fill; box.ScrollBars=ScrollBars.Vertical; box.BorderStyle=BorderStyle.None; box.BackColor=Color.White; box.ForeColor=ink; box.Font=new Font("Microsoft YaHei UI",9.5F); }
   void SetupButton(Button b,string text,int width,bool primary) { b.Text=text; b.AutoSize=true; b.AutoSizeMode=AutoSizeMode.GrowAndShrink; b.MinimumSize=new Size(width,36); b.Padding=new Padding(12,5,12,5); b.Margin=new Padding(0,0,8,5); b.FlatStyle=FlatStyle.Flat; b.FlatAppearance.BorderColor=Color.FromArgb(207,216,231); b.BackColor=primary?blue:Color.White; b.ForeColor=primary?Color.White:ink; b.Cursor=Cursors.Hand; if(primary) b.EnabledChanged+=delegate { b.BackColor=b.Enabled?blue:Color.FromArgb(235,239,245); b.ForeColor=b.Enabled?Color.White:muted; }; }
@@ -137,7 +142,7 @@ namespace CCSwitchUpdater {
    programPath.Text=exe; programPath.Select(0,0); dataPath.Text=dataDirectory; dataPath.Select(0,0); pathTips.SetToolTip(programPath,exe); pathTips.SetToolTip(dataPath,dataDirectory);
   }
   void SetBusy(bool value) {
-   busy=value; check.Enabled=!value; launch.Enabled=!value;
+   busy=value; check.Enabled=!value; launch.Enabled=!value; networkLink.Enabled=!value;
    update.Enabled=!value && latest!=null && current!=null && latest.Version>=current;
    update.Text=latest!=null && current!=null && latest.Version>=current
     ? (architecture!=targetArchitecture ? "修复为 "+targetArchitecture : latest.Version==current ? "重新安装 / 修复" : "下载并更新") : "下载并更新";
@@ -159,7 +164,7 @@ namespace CCSwitchUpdater {
    try { Core.EnsureNoReparse(work); Directory.CreateDirectory(work); string file=Path.Combine(work,"update-"+DateTime.Now.ToString("yyyyMMdd")+".log"); Core.EnsureNoReparse(file); File.AppendAllText(file,line); }
    catch(IOException) {} catch(UnauthorizedAccessException) {} catch(InvalidDataException) {}
   }
-  void Fail(Exception e) { string message=e is System.Net.Http.HttpRequestException ? "无法连接 GitHub。请检查网络或系统代理后重试。" : e.Message; Status(message,true); Log("失败："+message); }
+  void Fail(Exception e) { string message=e is System.Net.Http.HttpRequestException ? GitHubFailure.TransportMessage(e) : e.Message; Status(message,true); Log("失败："+message); }
   async Task CheckAsync() {
    if(busy) return;
    automaticCheckStarted=true;
@@ -167,13 +172,15 @@ namespace CCSwitchUpdater {
    cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(45));
    try {
     RefreshLocal();
+    Log("连接方式："+networkSettings.Label+"；目标为官方 GitHub API。");
+    networkCooldown.Check(DateTimeOffset.UtcNow);
     latest=await fetchRelease(targetArchitecture,cancellation.Token);
     if(IsDisposed || Disposing) return;
     latestValue.Text=latest.Version.ToString(3); notesBrowser.DocumentText=Markdown.ToDocument(latest.Notes);
     ShowReleaseStatus();
     Log("本机 "+current.ToString(3)+"（"+architecture+"） / 官方 "+latest.Tag+" / 系统及目标 "+targetArchitecture);
    } catch(OperationCanceledException) { if(!IsDisposed && !Disposing) { Status("检查已取消或超时。可检查系统代理后重试。",false); Log("检查取消或超时。"); } }
-   catch(Exception e) { latest=null; if(!IsDisposed && !Disposing) { latestValue.Text="未获取"; Fail(e); } }
+   catch(Exception e) { latest=null; var netError=e as GitHubNetworkException; if(netError!=null) networkCooldown.Record(netError); if(!IsDisposed && !Disposing) { latestValue.Text="未获取"; Fail(e); notesBrowser.DocumentText=Markdown.ToDocument("## 检查未完成\n\n可通过下方的网络设置选择系统代理、直连或自定义 HTTP 代理。\n\n也可以点击“浏览器打开官方发布页”，使用默认浏览器（例如 Chrome）查看官方版本和下载附件。\n\n不会绕过明确的限流等待，也不会关闭证书或 SHA-256 校验。"); } }
    finally { cancellation.Dispose(); cancellation=null; if(!IsDisposed && !Disposing) { progress.Style=ProgressBarStyle.Blocks; progress.Value=0; SetBusy(false); } }
   }
   static Process[] Running() { return Process.GetProcessesByName("cc-switch"); }
@@ -205,7 +212,7 @@ namespace CCSwitchUpdater {
      job=Path.Combine(work,"download-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(job); string zip=Path.Combine(job,"package.zip");
      Log("下载 "+latest.AssetName+"（"+(latest.Size/1048576.0).ToString("F1")+" MB）。"); Status("正在下载，CC Switch 暂时无需退出…",false);
      var report=new Progress<int>(delegate(int n) { progress.Value=n; Status("正在下载官方便携包… "+n+"%",false); });
-     using(var client=new GitHubClient()) await client.DownloadAsync(latest,zip,report,cancellation.Token);
+     using(var client=new GitHubClient(networkSettings,null,networkCooldown)) await client.DownloadAsync(latest,zip,report,cancellation.Token);
      cancellation.Token.ThrowIfCancellationRequested(); Status("正在校验 SHA-256、程序版本和架构…",false); progress.Style=ProgressBarStyle.Marquee;
      string stage=await Task.Run(delegate { Core.VerifyPackage(zip,latest); return Core.ExtractPackage(zip,Path.Combine(job,"stage"),latest,targetArchitecture); });
      cancellation.Token.ThrowIfCancellationRequested(); Log("文件大小、SHA-256、包结构、版本和架构校验通过。");
@@ -241,6 +248,22 @@ namespace CCSwitchUpdater {
   void Launch() {
    Core.EnsureNoReparse(exe);
    Process.Start(new ProcessStartInfo(exe) { WorkingDirectory=directory,UseShellExecute=true }); Log("已发送 CC Switch 启动请求。");
+  }
+  void UpdateNetworkLabel() { networkLink.Text="网络设置（"+networkSettings.Label+"）"; }
+  void ConfigureNetwork() {
+   if(busy) return;
+   using(var dialog=new NetworkSettingsForm(networkSettings)) {
+    if(dialog.ShowDialog(this)!=DialogResult.OK) return;
+    try {
+     dialog.Selected.Save(Path.Combine(work,"network.json")); networkSettings=dialog.Selected; UpdateNetworkLabel();
+     latest=null; latestValue.Text="未获取"; RefreshLocal(); SetBusy(false);
+     Status("已保存连接方式："+networkSettings.Label+"。点击检查更新；明确限流的等待时间不会被清除。",false);
+     Log("网络连接方式已更改为："+networkSettings.Label+"。未修改 Windows / Chrome 设置。");
+    } catch(Exception e) { Fail(e); }
+   }
+  }
+  void OpenOfficialRelease() {
+   Process.Start(new ProcessStartInfo("https://github.com/farion1231/cc-switch/releases/latest"){UseShellExecute=true});
   }
   void OpenDirectory(string path) {
    if(!Directory.Exists(path)) { MessageBox.Show(this,"暂时没有对应记录。首次检查或更新后会自动创建。","暂无记录"); return; }
