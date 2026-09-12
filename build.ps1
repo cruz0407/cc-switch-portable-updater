@@ -9,7 +9,7 @@ $app = Join-Path $OutputDirectory 'CCSwitch-Update-Helper.exe'
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $refs = @('/r:System.dll','/r:System.Core.dll','/r:System.Web.Extensions.dll','/r:System.IO.Compression.dll','/r:System.IO.Compression.FileSystem.dll','/r:System.Net.Http.dll','/r:System.Windows.Forms.dll','/r:System.Drawing.dll')
 New-Item -ItemType Directory -Force -Path (Join-Path $root 'build') | Out-Null
-& $csc /nologo /target:library /out:"$root\build\Helper.Core.dll" @refs "$root\src\Core.cs" "$root\src\Markdown.cs" "$root\src\NetworkSupport.cs"
+& $csc /nologo /target:library /out:"$root\build\Helper.Core.dll" @refs "$root\src\Core.cs" "$root\src\Markdown.cs" "$root\src\NetworkSupport.cs" "$root\src\GitHubWebFallback.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
 if ($Test) {
     & $csc /nologo /target:exe /out:"$root\build\Helper.Tests.exe" @refs /r:"$root\build\Helper.Core.dll" "$root\tests\Tests.cs"
@@ -31,7 +31,7 @@ if ($Test) {
 
 }
 if (Test-Path -LiteralPath "$root\src\Program.cs") {
-    & $csc /nologo /target:winexe /optimize+ /platform:anycpu /win32manifest:"$root\app.manifest" /out:"$app" @refs "$root\src\Core.cs" "$root\src\Markdown.cs" "$root\src\NetworkSupport.cs" "$root\src\GitHubClient.cs" "$root\src\MainForm.cs" "$root\src\NetworkSettingsForm.cs" "$root\src\Program.cs"
+    & $csc /nologo /target:winexe /optimize+ /platform:anycpu /win32manifest:"$root\app.manifest" /out:"$app" @refs "$root\src\Core.cs" "$root\src\Markdown.cs" "$root\src\NetworkSupport.cs" "$root\src\GitHubWebFallback.cs" "$root\src\GitHubClient.cs" "$root\src\MainForm.cs" "$root\src\NetworkSettingsForm.cs" "$root\src\GitHubWebFallback.cs" "$root\src\Program.cs"
     if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
 }
 if ($Test -and (Test-Path -LiteralPath "$root\src\Program.cs")) {
@@ -65,3 +65,4 @@ if ($Test -and (Test-Path -LiteralPath $app)) {
         if ($LASTEXITCODE -ne 0) { throw "Layout stress regression at $factor" }
     }
 }
+

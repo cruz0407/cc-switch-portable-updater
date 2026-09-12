@@ -21,9 +21,9 @@ class StartupTests {
   File.WriteAllText(Path.Combine(root,"portable.ini"),"portable=true"); return root;
  }
  static MainForm Create(string root,Func<string,CancellationToken,Task<Release>> fetch) {
-  var ctor=typeof(MainForm).GetConstructor(new[]{typeof(string),typeof(Func<string,CancellationToken,Task<Release>>)});
+  var ctor=typeof(MainForm).GetConstructor(new[]{typeof(string),typeof(Func<string,CancellationToken,Task<Release>>),typeof(bool)});
   if(ctor==null) throw new Exception("Missing injectable release-fetch boundary for deterministic startup tests");
-  return (MainForm)ctor.Invoke(new object[]{root,fetch});
+  return (MainForm)ctor.Invoke(new object[]{root,fetch,false});
  }
  [STAThread] static int Main(string[] args) {
   Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -60,3 +60,4 @@ class StartupTests {
   } catch(Exception error) { Console.Error.WriteLine("FAIL "+error.GetType().FullName+": "+error.Message); return 1; }
  }
 }
+

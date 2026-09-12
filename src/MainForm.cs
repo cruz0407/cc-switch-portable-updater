@@ -10,6 +10,7 @@ namespace CCSwitchUpdater {
  public sealed class MainForm : Form {
   readonly string directory, exe, work, backupRoot;
   readonly Func<string,CancellationToken,Task<Release>> fetchRelease;
+  readonly bool useWebFallback;
   readonly NetworkCooldown networkCooldown=new NetworkCooldown();
   NetworkSettings networkSettings=new NetworkSettings();
   readonly LinkLabel networkLink=new LinkLabel();
@@ -25,7 +26,9 @@ namespace CCSwitchUpdater {
   readonly ProgressBar progress=new ProgressBar();
   readonly Button check=new Button(), update=new Button(), launch=new Button(), cancel=new Button();
   readonly Color blue=Color.FromArgb(38,83,179), ink=Color.FromArgb(31,45,65), muted=Color.FromArgb(100,113,133);
-  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher = null) {
+  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher = null) : this(targetDirectory, releaseFetcher, true) { }
+  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher, bool enableWebFallback) {
+   useWebFallback=enableWebFallback && releaseFetcher==null;
    fetchRelease=releaseFetcher ?? FetchOfficialReleaseAsync;
    directory=Path.GetFullPath(targetDirectory); exe=Path.Combine(directory,"cc-switch.exe");
    work=Path.Combine(directory,"update-helper-data");
@@ -165,6 +168,16 @@ namespace CCSwitchUpdater {
    catch(IOException) {} catch(UnauthorizedAccessException) {} catch(InvalidDataException) {}
   }
   void Fail(Exception e) { string message=e is System.Net.Http.HttpRequestException ? GitHubFailure.TransportMessage(e) : e.Message; Status(message,true); Log("失败："+message); }
+  async Task<Release> FetchReleaseWithFallbackAsync(string architecture, CancellationToken token) {
+   GitHubNetworkException apiError=null;
+   try { return await fetchRelease(architecture,token); }
+   catch(GitHubNetworkException error) { apiError=error; }
+   if(!useWebFallback) throw apiError;
+   networkCooldown.Record(apiError);
+   Log("API 暂不可用，切换官方 Releases 网页备用路径："+apiError.Message);
+   Status("API 暂不可用，正在尝试官方网页备用路径…",false);
+   return await GitHubWebFallback.GetLatestAsync(networkSettings,architecture,token);
+  }
   async Task CheckAsync() {
    if(busy) return;
    automaticCheckStarted=true;
@@ -174,7 +187,7 @@ namespace CCSwitchUpdater {
     RefreshLocal();
     Log("连接方式："+networkSettings.Label+"；目标为官方 GitHub API。");
     networkCooldown.Check(DateTimeOffset.UtcNow);
-    latest=await fetchRelease(targetArchitecture,cancellation.Token);
+    latest=await FetchReleaseWithFallbackAsync(targetArchitecture,cancellation.Token);
     if(IsDisposed || Disposing) return;
     latestValue.Text=latest.Version.ToString(3); notesBrowser.DocumentText=Markdown.ToDocument(latest.Notes);
     ShowReleaseStatus();
@@ -189,15 +202,16 @@ namespace CCSwitchUpdater {
   }
   async Task<bool> RequestExitAsync() {
    var processes=Running();
-   try {
-    foreach(var p in processes) { try { p.CloseMainWindow(); } catch(InvalidOperationException) {} }
-   } finally { foreach(var p in processes) p.Dispose(); }
-   for(int i=0;i<10;i++) { await Task.Delay(300); var p=Running(); int count=p.Length; foreach(var item in p) item.Dispose(); if(count==0) return true; }
-   while(true) {
-    var result=MessageBox.Show(this,"CC Switch 仍在后台运行。\r\n\r\n请在系统托盘右键 CC Switch → 退出，然后点击“重试”。\r\n为保证数据备份一致，请退出所有 CC Switch 实例。\r\n\r\n助手不会强制结束进程。","请退出 CC Switch",MessageBoxButtons.RetryCancel,MessageBoxIcon.Information);
-    if(result!=DialogResult.Retry) return false;
-    try { EnsureStopped(); return true; } catch(IOException) {}
-   }
+   try { foreach(var p in processes) { try { p.CloseMainWindow(); } catch(InvalidOperationException) {} } }
+   finally { foreach(var p in processes) p.Dispose(); }
+   for(int i=0;i<34;i++) { await Task.Delay(300); var p=Running(); int count=p.Length; foreach(var item in p) item.Dispose(); if(count==0) return true; }
+   var result=MessageBox.Show(this,"CC Switch 在 10 秒内没有正常退出。\r\n\r\n点击“强制关闭并继续”会结束所有 cc-switch.exe 实例，未保存内容可能丢失。\r\n如果你不确定，请选择“取消”，助手不会结束进程。","CC Switch 未自动退出",MessageBoxButtons.YesNoCancel,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button3);
+   if(result!=DialogResult.Yes) return false;
+   var remaining=Running();
+   try { foreach(var p in remaining) { try { if(!p.HasExited) p.Kill(); } catch(InvalidOperationException) {} } }
+   finally { foreach(var p in remaining) p.Dispose(); }
+   for(int i=0;i<20;i++) { await Task.Delay(250); var p=Running(); int count=p.Length; foreach(var item in p) item.Dispose(); if(count==0) return true; }
+   throw new IOException("已请求强制关闭，但 CC Switch 仍在运行；为保护数据，已停止更新。");
   }
   async Task UpdateAsync() {
    if(busy || latest==null) return;
@@ -271,3 +285,11 @@ namespace CCSwitchUpdater {
   }
  }
 }
+
+
+
+
+
+
+
+

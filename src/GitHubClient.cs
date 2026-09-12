@@ -74,7 +74,7 @@ namespace CCSwitchUpdater {
    Core.EnsureNoReparse(destination);
    using(var response=await GetAsync(release.DownloadUrl,true,token).ConfigureAwait(false)) {
     long? length=response.Content.Headers.ContentLength;
-    if(length.HasValue && length.Value!=release.Size) throw new InvalidDataException("服务器返回的文件大小与发布信息不一致。");
+    if(length.HasValue && release.Size>0 && length.Value!=release.Size) throw new InvalidDataException("服务器返回的文件大小与发布信息不一致。");
     using(var input=await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
     using(var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None,65536,true)) {
      byte[] buffer=new byte[65536]; long total=0; int n,last=-1;
@@ -84,7 +84,7 @@ namespace CCSwitchUpdater {
       await output.WriteAsync(buffer,0,n,token).ConfigureAwait(false);
       int value=(int)(total*100/release.Size); if(value!=last && progress!=null) { last=value; progress.Report(value); }
      }
-     if(total!=release.Size) throw new InvalidDataException("下载未完成，请重试。");
+     if(release.Size<=0) release.Size=total; if(total!=release.Size) throw new InvalidDataException("下载未完成，请重试。");
      await output.FlushAsync(token).ConfigureAwait(false);
     }
    }
@@ -92,3 +92,4 @@ namespace CCSwitchUpdater {
   public void Dispose() { client.Dispose(); }
  }
 }
+

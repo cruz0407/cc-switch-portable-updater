@@ -2,7 +2,7 @@
 
 把 Windows 便携版的「打开 GitHub → 找包 → 下载 → 校验 → 备份 → 替换」放进一个中文窗口。
 
-**打开即检查更新 · Markdown 更新说明 · 同版本修复 · 明确错误与备用连接**
+**打开即检查更新 · Markdown 更新说明 · 同版本修复 · 自动关闭与备用连接**
 
 > 本工具是独立辅助项目，与 [CC Switch](https://github.com/farion1231/cc-switch) 官方没有隶属关系。不包含 CC Switch 本体。
 
@@ -69,7 +69,7 @@ CC-Switch/
 | 文件 | 用途 |
 | --- | --- |
 | `CCSwitch-Update-Helper.exe` | 直接运行的 Windows 助手 |
-| `CCSwitch-Update-Helper-v1.4.0-Windows-Portable.zip` | **包含 EXE**、中文 README 和版本记录的便携 ZIP |
+| `CCSwitch-Update-Helper-v1.6.0-Windows-Portable.zip` | **包含 EXE**、中文 README 和版本记录的便携 ZIP |
 | `SHA256SUMS.txt` | 上述 EXE 和 ZIP 的 SHA-256 校验值 |
 | GitHub 自动生成的 Source code | 对应 Release 标签的源代码 |
 
@@ -110,3 +110,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -OutputDirectory
 - 默认使用 Windows 系统代理，可在网络设置选择直连或自定义 HTTP 代理；检查时限 45 秒，下载时限 10 分钟。GitHub 限流时请稍后重试。
 - 备份/替换期间不要重新启动 CC Switch；工具不会强制结束其他程序。
 - 如果操作中断电，先保留备份，核对旧/新程序哈希，不要盲目覆盖数据库。
+
