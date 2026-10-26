@@ -10,8 +10,9 @@ using System.Web.Script.Serialization;
 namespace CCSwitchUpdater {
  public sealed class NetworkSettings {
   public string Mode {get;set;}
+  public bool AllowDownloadMirrors {get;set;}
   public string ProxyAddress {get;set;}
-  public NetworkSettings() {Mode="system";ProxyAddress="";}
+  public NetworkSettings() {Mode="system";ProxyAddress="";AllowDownloadMirrors=true;}
   public string Label {get {return Mode=="direct"?"直连":Mode=="custom"?"自定义 HTTP 代理":"系统代理";}}
   public void Validate() {
    if(Mode!="system" && Mode!="direct" && Mode!="custom") throw new InvalidDataException("网络连接方式无效，请重新设置。");
@@ -42,7 +43,7 @@ namespace CCSwitchUpdater {
    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
    string temporary=file+"."+Guid.NewGuid().ToString("N")+".tmp";
    try {
-    File.WriteAllText(temporary,new JavaScriptSerializer().Serialize(new NetworkSettings{Mode=Mode,ProxyAddress=Mode=="custom"?ProxyAddress:""}));
+    File.WriteAllText(temporary,new JavaScriptSerializer().Serialize(new NetworkSettings{Mode=Mode,ProxyAddress=Mode=="custom"?ProxyAddress:"",AllowDownloadMirrors=AllowDownloadMirrors}));
     if(File.Exists(file)) File.Replace(temporary,file,null); else File.Move(temporary,file);
    } finally {if(File.Exists(temporary)) File.Delete(temporary);}
   }
@@ -62,7 +63,7 @@ namespace CCSwitchUpdater {
    if(DateTimeOffset.TryParse(raw,CultureInfo.InvariantCulture,DateTimeStyles.AssumeUniversal,out date) && date>now && date<now.AddDays(7)) return date;
    return null;
   }
-  public static string WaitMessage(DateTimeOffset date) {return "请在 "+date.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz",CultureInfo.InvariantCulture)+" 后重试；等待期间不会自动重试或切换线路。";}
+  public static string WaitMessage(DateTimeOffset date) {return "请在 "+date.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz",CultureInfo.InvariantCulture)+" 后重试该接口；API 等待不影响官方网页和附件下载。";}
   public static GitHubNetworkException Describe(HttpResponseMessage response,string body,DateTimeOffset now) {
    int status=(int)response.StatusCode; string message=""; bool json=false;
    try {var value=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(body ?? ""); object raw; json=value!=null; if(json && value.TryGetValue("message",out raw)) message=raw as string ?? "";}catch(ArgumentException){}catch(InvalidOperationException){}

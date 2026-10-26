@@ -1,25 +1,48 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 namespace CCSwitchUpdater {
  public static class GitHubWebFallback {
-  public const string LatestReleasePage="https://github.com/farion1231/cc-switch/releases/latest";
+  public const string LatestReleasePage=GitHubHttp.WebRoot+"latest";
   public static Release Parse(string html,string tag,string architecture) {
-   if(String.IsNullOrWhiteSpace(html)||architecture!="x64"&&architecture!="arm64")throw new InvalidDataException("官方发布页内容不完整。");
+   Core.ParseVersion(tag);
+   if(!Regex.IsMatch(tag??"",@"^v\d+\.\d+\.\d+$") || (architecture!="x64"&&architecture!="arm64"))throw new InvalidDataException("发布标签或程序架构无效。");
+   if(String.IsNullOrWhiteSpace(html)||html.Length>6*1024*1024)throw new InvalidDataException("官方附件列表为空或过大。");
    string name="CC-Switch-"+tag+"-Windows"+(architecture=="arm64"?"-arm64":"")+"-Portable.zip";
-   string escaped=Regex.Escape(name); Match link=Regex.Match(html,"href=\\\"([^\\\"]*/releases/download/"+Regex.Escape(tag)+"/"+escaped+"\\\"",RegexOptions.IgnoreCase); if(!link.Success)throw new InvalidDataException("官方网页中未找到匹配的 Windows 便携包。");
-   Match digest=Regex.Match(html,"sha256:([a-f0-9]{64})",RegexOptions.IgnoreCase); if(!digest.Success)throw new InvalidDataException("官方网页未提供 SHA-256，已停止，避免安装来源不明的文件。");
-   string url="https://github.com"+WebUtility.HtmlDecode(link.Groups[1].Value); if(!Core.IsAllowedUrl(url,true))throw new InvalidDataException("官方网页给出的下载地址不可信。");
-   return new Release{Tag=tag,Version=Core.ParseVersion(tag),AssetName=name,DownloadUrl=url,Digest="sha256:"+digest.Groups[1].Value.ToLowerInvariant(),Size=0,Notes="通过官方 Releases 网页获取（API 暂不可用）。"};
+   string path="/farion1231/cc-switch/releases/download/"+tag+"/"+name, expected="https://github.com"+path;
+   string matched=null;int count=0;
+   foreach(Match row in Regex.Matches(html,@"<li\b[^>]*>[\s\S]*?</li>",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2))) {
+    bool found=false;
+    foreach(Match link in Regex.Matches(row.Value,"href\\s*=\\s*[\"']([^\"']+)[\"']",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(1))) {
+     string href=WebUtility.HtmlDecode(link.Groups[1].Value);
+     if(href==path || href==expected)found=true;
+    }
+    if(found){count++;matched=row.Value;}
+   }
+   if(count!=1)throw new InvalidDataException("官方网页未找到唯一匹配的便携包；请勿使用其他架构或邻近附件的校验值。");
+   var digests=Regex.Matches(matched,@"sha256:([a-fA-F0-9]{64})(?![a-fA-F0-9])").Cast<Match>().Select(x=>x.Groups[1].Value.ToLowerInvariant()).Distinct().ToArray();
+   if(digests.Length!=1)throw new InvalidDataException("目标附件没有唯一的官方 SHA-256，无法安全安装。");
+   return new Release{Tag=tag,Version=Core.ParseVersion(tag),AssetName=name,DownloadUrl=expected,Digest="sha256:"+digests[0],Size=0,Source="官方 Releases 网页",Notes="# CC Switch "+tag+"\n\n已通过官方发布页获取版本、下载地址及目标附件 SHA-256。\n\n[查看完整更新说明](https://github.com/farion1231/cc-switch/releases/tag/"+tag+")"};
   }
-  public static bool CanVerifyAfterDownload(long expected,long digestSize,long actual){return expected==actual;}
-  public static async Task<Release> GetLatestAsync(NetworkSettings settings,string architecture,CancellationToken token) {
-   using(var client=new HttpClient(settings.CreateHandler())) {client.Timeout=TimeSpan.FromSeconds(45);client.DefaultRequestHeaders.UserAgent.ParseAdd("CCSwitch-Portable-Update-Helper/1.5");var page=await client.GetStringAsync(LatestReleasePage).ConfigureAwait(false);Match tag=Regex.Match(page,"/releases/tag/(v\\d+\\.\\d+\\.\\d+)");if(!tag.Success)throw new InvalidDataException("官方发布页未找到稳定版本标签。");using(var expanded=await client.GetAsync("https://github.com/farion1231/cc-switch/releases/expanded_assets/"+tag.Groups[1].Value,HttpCompletionOption.ResponseContentRead,token).ConfigureAwait(false)){if(!expanded.IsSuccessStatusCode)throw new IOException("官方附件列表无法访问（HTTP "+(int)expanded.StatusCode+"）。");return Parse(await expanded.Content.ReadAsStringAsync().ConfigureAwait(false),tag.Groups[1].Value,architecture);}}
+  public static async Task<Release> GetLatestAsync(NetworkSettings settings,string architecture,CancellationToken token,HttpMessageHandler handler=null) {
+   using(var client=GitHubHttp.CreateClient(settings,handler)) {
+    string tag;
+    using(var response=await GitHubHttp.GetAsync(client,LatestReleasePage,"web",null,token).ConfigureAwait(false)) {
+     string final=response.RequestMessage==null?"":response.RequestMessage.RequestUri.AbsoluteUri;
+     if(!GitHubHttp.IsWebUrl(final))throw new InvalidDataException("官方最新发布页未返回有效目标地址。");
+     var match=Regex.Match(final,@"/releases/tag/(v\d+\.\d+\.\d+)$");
+     if(!match.Success)throw new InvalidDataException("官方最新发布页未重定向到稳定版标签。");
+     tag=match.Groups[1].Value;
+    }
+    using(var response=await GitHubHttp.GetAsync(client,GitHubHttp.WebRoot+"expanded_assets/"+tag,"web",null,token).ConfigureAwait(false)) {
+     return Parse(await GitHubHttp.ReadTextAsync(response,6*1024*1024,token).ConfigureAwait(false),tag,architecture);
+    }
+   }
   }
  }
 }

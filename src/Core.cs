@@ -15,7 +15,7 @@ using System.Web.Script.Serialization;
 
 namespace CCSwitchUpdater {
  public sealed class Release {
-  public string Tag, AssetName, DownloadUrl, Notes, Digest;
+  public string Tag, AssetName, DownloadUrl, Notes, Digest, Source;
   public long Size;
   public Version Version;
  }
@@ -252,5 +252,3 @@ namespace CCSwitchUpdater {
   }
  }
 }
-
-

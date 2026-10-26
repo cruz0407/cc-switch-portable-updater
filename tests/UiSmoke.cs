@@ -16,6 +16,7 @@ class UiSmoke {
   Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
   try {
    using(var f=new MainForm(args[0])) {
+    if(args.Length>2 && args[2]=="--web") Field<NetworkCooldown>(f,"networkCooldown").Record(new GitHubNetworkException("primary","Forced API cooldown for live web-route verification",DateTimeOffset.UtcNow.AddHours(1)));
     f.StartPosition=FormStartPosition.Manual; f.Location=new Point(-30000,-30000); f.ShowInTaskbar=false; f.Show();
     var timer=Stopwatch.StartNew();
     // No PerformClick: only the production Shown handler starts the request.

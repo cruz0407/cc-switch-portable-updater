@@ -28,6 +28,7 @@ class NetworkTests {
   Test("unknown mode rejected",delegate {Invalid(delegate {new NetworkSettings{Mode="magic"}.Validate();});});
   Test("settings round trip and default missing file",delegate {string root=Path.Combine(Path.GetTempPath(),"ccswitch-network-tests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);string path=Path.Combine(root,"network.json");Assert(NetworkSettings.Load(path).Mode=="system","bad default");new NetworkSettings{Mode="custom",ProxyAddress="http://127.0.0.1:7890"}.Save(path);Assert(NetworkSettings.Load(path).ProxyAddress=="http://127.0.0.1:7890","lost config");new NetworkSettings{Mode="direct"}.Save(path);Assert(NetworkSettings.Load(path).Mode=="direct","second save failed");});
   Test("corrupt settings fail visibly not silently change route",delegate {string path=Path.GetTempFileName();File.WriteAllText(path,"broken");Invalid(delegate {NetworkSettings.Load(path);});});
+  Test("proxy-download fallback defaults on and can be persisted off",delegate {var first=new NetworkSettings();Assert(first.AllowDownloadMirrors,"default fallback off");string dir=Path.Combine(Path.GetTempPath(),"ccswitch-mirrors-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);string file=Path.Combine(dir,"network.json");first.AllowDownloadMirrors=false;first.Save(file);Assert(!NetworkSettings.Load(file).AllowDownloadMirrors,"opt-out lost");});
   Console.WriteLine("RESULT "+passed+" passed, "+failed+" failed");Environment.ExitCode=failed==0?0:1;
  }
 }

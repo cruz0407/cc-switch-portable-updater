@@ -33,4 +33,3 @@ class UiRegression {
   Console.WriteLine("RESULT "+passed+" passed, "+failed+" failed. "+root); return failed==0?0:1;
  }
 }
-

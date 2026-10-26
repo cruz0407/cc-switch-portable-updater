@@ -11,6 +11,7 @@ namespace CCSwitchUpdater {
   readonly string directory, exe, work, backupRoot;
   readonly Func<string,CancellationToken,Task<Release>> fetchRelease;
   readonly bool useWebFallback;
+  readonly Func<NetworkSettings,System.Net.Http.HttpMessageHandler> routeTransport;
   readonly NetworkCooldown networkCooldown=new NetworkCooldown();
   NetworkSettings networkSettings=new NetworkSettings();
   readonly LinkLabel networkLink=new LinkLabel();
@@ -27,7 +28,9 @@ namespace CCSwitchUpdater {
   readonly Button check=new Button(), update=new Button(), launch=new Button(), cancel=new Button();
   readonly Color blue=Color.FromArgb(38,83,179), ink=Color.FromArgb(31,45,65), muted=Color.FromArgb(100,113,133);
   public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher = null) : this(targetDirectory, releaseFetcher, true) { }
-  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher, bool enableWebFallback) {
+  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher, bool enableWebFallback) : this(targetDirectory,releaseFetcher,enableWebFallback,null) { }
+  public MainForm(string targetDirectory, Func<string,CancellationToken,Task<Release>> releaseFetcher, bool enableWebFallback, Func<NetworkSettings,System.Net.Http.HttpMessageHandler> transportFactory) {
+   routeTransport=transportFactory;
    useWebFallback=enableWebFallback && releaseFetcher==null;
    fetchRelease=releaseFetcher ?? FetchOfficialReleaseAsync;
    directory=Path.GetFullPath(targetDirectory); exe=Path.Combine(directory,"cc-switch.exe");
@@ -168,32 +171,27 @@ namespace CCSwitchUpdater {
    catch(IOException) {} catch(UnauthorizedAccessException) {} catch(InvalidDataException) {}
   }
   void Fail(Exception e) { string message=e is System.Net.Http.HttpRequestException ? GitHubFailure.TransportMessage(e) : e.Message; Status(message,true); Log("失败："+message); }
-  async Task<Release> FetchReleaseWithFallbackAsync(string architecture, CancellationToken token) {
-   GitHubNetworkException apiError=null;
-   try { return await fetchRelease(architecture,token); }
-   catch(GitHubNetworkException error) { apiError=error; }
-   if(!useWebFallback) throw apiError;
-   networkCooldown.Record(apiError);
-   Log("API 暂不可用，切换官方 Releases 网页备用路径："+apiError.Message);
-   Status("API 暂不可用，正在尝试官方网页备用路径…",false);
-   return await GitHubWebFallback.GetLatestAsync(networkSettings,architecture,token);
+  async Task<Release> FetchReleaseWithFallbackAsync(string architecture,CancellationToken token) {
+   if(!useWebFallback) {networkCooldown.Check(DateTimeOffset.UtcNow);return await fetchRelease(architecture,token);}
+   var updates=new Progress<string>(delegate(string message){if(!IsDisposed&&!Disposing){Status(message,false);Log(message);}});
+   return await new UpdateRoutes(networkSettings,networkCooldown,message=>((IProgress<string>)updates).Report(message),routeTransport).GetLatestAsync(architecture,token);
   }
   async Task CheckAsync() {
    if(busy) return;
    automaticCheckStarted=true;
    latest=null; SetBusy(true); progress.Style=ProgressBarStyle.Marquee; Status("正在检查 GitHub 官方稳定版…",false); Log("检查官方稳定版。");
-   cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(45));
+   cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(70));
    try {
     RefreshLocal();
     Log("连接方式："+networkSettings.Label+"；目标为官方 GitHub API。");
-    networkCooldown.Check(DateTimeOffset.UtcNow);
     latest=await FetchReleaseWithFallbackAsync(targetArchitecture,cancellation.Token);
     if(IsDisposed || Disposing) return;
     latestValue.Text=latest.Version.ToString(3); notesBrowser.DocumentText=Markdown.ToDocument(latest.Notes);
     ShowReleaseStatus();
+    if(!String.IsNullOrEmpty(latest.Source)) Status(status.Text+" 来源："+latest.Source,false);
     Log("本机 "+current.ToString(3)+"（"+architecture+"） / 官方 "+latest.Tag+" / 系统及目标 "+targetArchitecture);
    } catch(OperationCanceledException) { if(!IsDisposed && !Disposing) { Status("检查已取消或超时。可检查系统代理后重试。",false); Log("检查取消或超时。"); } }
-   catch(Exception e) { latest=null; var netError=e as GitHubNetworkException; if(netError!=null) networkCooldown.Record(netError); if(!IsDisposed && !Disposing) { latestValue.Text="未获取"; Fail(e); notesBrowser.DocumentText=Markdown.ToDocument("## 检查未完成\n\n可通过下方的网络设置选择系统代理、直连或自定义 HTTP 代理。\n\n也可以点击“浏览器打开官方发布页”，使用默认浏览器（例如 Chrome）查看官方版本和下载附件。\n\n不会绕过明确的限流等待，也不会关闭证书或 SHA-256 校验。"); } }
+   catch(Exception e) { latest=null; var netError=e as GitHubNetworkException; if(netError!=null) networkCooldown.Record(netError); if(!IsDisposed && !Disposing) { latestValue.Text="未获取"; Fail(e); notesBrowser.DocumentText=Markdown.ToDocument("## 检查未完成\n\n可通过下方的网络设置选择系统代理、直连或自定义 HTTP 代理。\n\n也可以点击“浏览器打开官方发布页”，使用默认浏览器（例如 Chrome）查看官方版本和下载附件。\n\n已经依次尝试可用的官方与直连线路；API 限流不会锁住官方网页或附件下载。所有方案保留证书与官方 SHA-256 校验。"); } }
    finally { cancellation.Dispose(); cancellation=null; if(!IsDisposed && !Disposing) { progress.Style=ProgressBarStyle.Blocks; progress.Value=0; SetBusy(false); } }
   }
   static Process[] Running() { return Process.GetProcessesByName("cc-switch"); }
@@ -226,7 +224,8 @@ namespace CCSwitchUpdater {
      job=Path.Combine(work,"download-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(job); string zip=Path.Combine(job,"package.zip");
      Log("下载 "+latest.AssetName+"（"+(latest.Size/1048576.0).ToString("F1")+" MB）。"); Status("正在下载，CC Switch 暂时无需退出…",false);
      var report=new Progress<int>(delegate(int n) { progress.Value=n; Status("正在下载官方便携包… "+n+"%",false); });
-     using(var client=new GitHubClient(networkSettings,null,networkCooldown)) await client.DownloadAsync(latest,zip,report,cancellation.Token);
+     var routeMessages=new Progress<string>(delegate(string text){if(!IsDisposed){Status(text,false);Log(text);}});
+     await new UpdateRoutes(networkSettings,networkCooldown,text=>((IProgress<string>)routeMessages).Report(text),routeTransport).DownloadAsync(latest,zip,report,cancellation.Token);
      cancellation.Token.ThrowIfCancellationRequested(); Status("正在校验 SHA-256、程序版本和架构…",false); progress.Style=ProgressBarStyle.Marquee;
      string stage=await Task.Run(delegate { Core.VerifyPackage(zip,latest); return Core.ExtractPackage(zip,Path.Combine(job,"stage"),latest,targetArchitecture); });
      cancellation.Token.ThrowIfCancellationRequested(); Log("文件大小、SHA-256、包结构、版本和架构校验通过。");
@@ -285,11 +284,3 @@ namespace CCSwitchUpdater {
   }
  }
 }
-
-
-
-
-
-
-
-

@@ -68,5 +68,3 @@ class LayoutRegression {
   Console.WriteLine("RESULT "+checks+" geometry checks, "+failures+" failures"); return failures==0?0:1;
  }
 }
-
-

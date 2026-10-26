@@ -60,4 +60,3 @@ class StartupTests {
   } catch(Exception error) { Console.Error.WriteLine("FAIL "+error.GetType().FullName+": "+error.Message); return 1; }
  }
 }
-

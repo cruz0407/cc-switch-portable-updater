@@ -2,13 +2,13 @@
 
 把 Windows 便携版的「打开 GitHub → 找包 → 下载 → 校验 → 备份 → 替换」放进一个中文窗口。
 
-**打开即检查更新 · Markdown 更新说明 · 同版本修复 · 自动关闭与备用连接**
+**打开即检查 · API / 官方网页双通道 · 自动直连 · 备用下载代理 · 校验后安装**
 
 > 本工具是独立辅助项目，与 [CC Switch](https://github.com/farion1231/cc-switch) 官方没有隶属关系。不包含 CC Switch 本体。
 
 [下载最新版](https://github.com/cruz0407/cc-switch-portable-updater/releases/latest) · [版本记录](CHANGELOG.md)
 
-![中文界面与 Markdown 更新说明](docs/images/preview-v1.3.png)
+![中文界面与 Markdown 更新说明](docs/images/preview-v1.7.png)
 
 ## 快速使用
 
@@ -16,7 +16,7 @@
 2. 把助手放到 `cc-switch.exe`、`portable.ini` **同一目录**。
 3. 双击助手：窗口显示后会自动检查一次 **CC Switch 官方稳定版**，不用再点检查按钮。
 4. 有新版时点击 **下载并更新**；同版本需要覆盖时点击 **重新安装 / 修复**。
-5. 下载与校验完成后，确认更新，并按提示从系统托盘正常退出 CC Switch。
+5. 下载与校验完成后确认更新。助手尝试正常关闭 CC Switch；超时后可确认强制关闭，或取消。
 6. 助手备份数据和旧程序，替换主程序，然后尝试重新启动 CC Switch。
 
 ```text
@@ -49,12 +49,21 @@ CC-Switch/
 - 使用 Windows 内置 `WebBrowser` 控件，不需要另装 WebView2。
 - 实现的是适合发布说明的 Markdown 子集，并非完整 CommonMark / GitHub Flavored Markdown 引擎。复杂嵌套语法、任意 HTML 和远程媒体不在支持范围内。
 
-## 网络拒绝请求怎么办？
+## 网络失败时继续尝试
 
-窗口底部新增 **网络设置** 和 **浏览器打开官方发布页**。网络设置支持系统代理、直连和自定义 HTTP 正向代理，作用于本工具的查询与下载，不改变 Windows / Chrome 设置。
+**v1.7.0 会自动尝试多条线路，再继续备份安装。API 限流不会锁死更新按钮。**
 
-403 会依据响应区分配额耗尽、频率限制、普通拒绝或可能的网关拦截，能取得恢复时间时直接显示；明确限流期间不自动切线路或连续重试。没有内置来源不明的公共反代。详见 [网络错误与备用连接](docs/network.md)。
+- 查版本：官方 API → 官方 Releases 网页，连接失败再尝试直连 / 系统备用连接。
+- 下安装包：官方地址 → 官方直连 → gh-proxy.com → ghfast.top。
+- 代理只传输文件；校验值从官方获取。错误哈希 / 半包会被丢弃，继续下一线路。
+- 窗口和日志显示正在尝试的方案；网络设置可修改首选方式、关闭第三方下载代理。
+- 全部路径失败后才结束，不需要你在每次失败后手动找包或切代理。
 
+自动直连可能使用不同于首选代理的出口，只用于本工具的公开更新请求。不会改变 Windows / Chrome 设置。
+
+2026-10-26 已在 API 被模拟限流的情况下验证：官方网页取得 v4.0.21 信息，官方直连和两条下载代理都下载并校验通过，隔离目录的备份/安装通过。
+
+详见 [网络说明](docs/network.md) 和 [逐项验收记录](docs/multi-route-verification.md)。
 ## 备份与隐私
 
 - 备份位置：`%LOCALAPPDATA%\CCSwitchUpdateHelper\backups`。
@@ -69,7 +78,7 @@ CC-Switch/
 | 文件 | 用途 |
 | --- | --- |
 | `CCSwitch-Update-Helper.exe` | 直接运行的 Windows 助手 |
-| `CCSwitch-Update-Helper-v1.6.0-Windows-Portable.zip` | **包含 EXE**、中文 README 和版本记录的便携 ZIP |
+| `CCSwitch-Update-Helper-v1.7.0-Windows-Portable.zip` | **包含 EXE**、中文 README 和版本记录的便携 ZIP |
 | `SHA256SUMS.txt` | 上述 EXE 和 ZIP 的 SHA-256 校验值 |
 | GitHub 自动生成的 Source code | 对应 Release 标签的源代码 |
 
@@ -97,7 +106,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -OutputDirectory
 - 11 项 Markdown 渲染与安全测试；
 - 6 项架构 / 同版本修复回归场景；
 - 6 项启动检查、重试、关闭取消和真实 HTML DOM 场景；
-- 25 项网络诊断、代理配置、请求等待及网络界面场景；
+- 26 项网络诊断、代理配置、请求等待及网络界面场景；
+- 7 项官方网页解析、2 项未知大小下载、15 项多线路集成、2 项真实窗口回归场景；
 - DPI、最小窗口、长提示与长路径布局检查。
 
 已有测试在 Windows x64 上执行；ARM64 包选择有回归测试，但没有 ARM64 实机验证。125% / 200% 使用字号和几何尺寸模拟，不能等同于跨显示器 DPI 实测。
@@ -107,7 +117,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -OutputDirectory
 - 仅处理官方稳定版 Windows x64 / ARM64 Portable 包，不支持 MSI、预发布版和降级。
 - 不支持符号链接 / 目录联接目标；数据备份超过 2 GB 则停止。
 - 官方摘要缺失、压缩包结构改变、权限不足或文件占用时停止，不猜测覆盖。
-- 默认使用 Windows 系统代理，可在网络设置选择直连或自定义 HTTP 代理；检查时限 45 秒，下载时限 10 分钟。GitHub 限流时请稍后重试。
-- 备份/替换期间不要重新启动 CC Switch；工具不会强制结束其他程序。
+- 默认自动尝试系统代理、官方网页、直连与备用下载代理。检查总时限 70 秒，下载总时限 10 分钟；单条连接有独立超时。
+- 备份/替换期间不要重新启动 CC Switch。只有你明确确认强制关闭时才结束仍在运行的 CC Switch 实例。
 - 如果操作中断电，先保留备份，核对旧/新程序哈希，不要盲目覆盖数据库。
-

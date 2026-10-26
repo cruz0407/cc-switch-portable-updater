@@ -1,5 +1,4 @@
 using System;
-using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -27,6 +26,3 @@ class NetworkUiTests {
   Console.WriteLine("RESULT 2 network UI scenarios passed");return 0;
  }catch(Exception e){Console.Error.WriteLine("FAIL "+e.GetType().Name+": "+e.Message);return 1;}}
 }
-
-
-
